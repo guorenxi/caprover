@@ -1,5 +1,5 @@
-import externalIp = require('public-ip')
 import DockerApi from '../docker/DockerApi'
+import { IAppEnvVar, IAppPort } from '../models/AppDefinition'
 import BackupManager from '../user/system/BackupManager'
 import CaptainConstants from './CaptainConstants'
 import EnvVar from './EnvVars'
@@ -49,14 +49,6 @@ function checkSystemReq() {
                 )
             } else {
                 console.log('   Ubuntu detected.')
-            }
-
-            if (output.Architecture.toLowerCase().indexOf('x86') < 0) {
-                console.log(
-                    '******* Warning *******    Default CapRover is compiled for X86 CPU. To use CapRover on other CPUs you can build from the source code'
-                )
-            } else {
-                console.log('   X86 CPU detected.')
             }
 
             const totalMemInMb = Math.round(output.MemTotal / 1000.0 / 1000.0)
@@ -126,7 +118,7 @@ function checkPortOrThrow(ipAddr: string, portToTest: number) {
         console.log(' ')
         console.log(' ')
         console.log(
-            'Are your trying to run CapRover on a local machine or a machine without public IP?'
+            'Are you trying to run CapRover on a local machine or a machine without a public IP?'
         )
         console.log(
             'In that case, you need to add this to your installation command:'
@@ -206,10 +198,28 @@ function printTroubleShootingUrl() {
 
 let myIp4: string
 
+async function initializeExternalIp() {
+    const externalIp = await import('public-ip')
+    return externalIp
+}
+
 export function install() {
     const backupManger = new BackupManager()
 
     Promise.resolve()
+        .then(function () {
+            if (!EnvVar.ACCEPTED_TERMS) {
+                throw new Error(
+                    `
+                Add the following to the installer line:
+                -e ACCEPTED_TERMS=true
+                
+                Terms of service must be accepted before installation, view them here: 
+                https://github.com/caprover/caprover/blob/master/TERMS_AND_CONDITIONS.md
+                `.trim()
+                )
+            }
+        })
         .then(function () {
             printTroubleShootingUrl()
         })
@@ -217,11 +227,26 @@ export function install() {
             return checkSystemReq()
         })
         .then(function () {
+            return initializeExternalIp()
+        })
+        .then(function (externalIp) {
             if (EnvVar.MAIN_NODE_IP_ADDRESS) {
                 return EnvVar.MAIN_NODE_IP_ADDRESS
             }
 
-            return externalIp.v4()
+            try {
+                const externalIpFetched = externalIp.publicIpv4()
+                if (externalIpFetched) {
+                    return externalIpFetched
+                }
+            } catch (error) {
+                console.error(
+                    'Defaulting to 127.0.0.1 - Error retrieving IP address:',
+                    error
+                )
+            }
+
+            return '127.0.0.1'
         })
         .then(function (ip4) {
             if (!ip4) {
@@ -255,13 +280,22 @@ export function install() {
             return startServerOnPort_80_443_3000()
         })
         .then(function () {
-            return checkPortOrThrow(myIp4, 80)
+            return checkPortOrThrow(
+                myIp4,
+                CaptainConstants.configs.nginxPortNumber80 as any
+            )
         })
         .then(function () {
-            return checkPortOrThrow(myIp4, 443)
+            return checkPortOrThrow(
+                myIp4,
+                CaptainConstants.configs.nginxPortNumber443 as any
+            )
         })
         .then(function () {
-            return checkPortOrThrow(myIp4, 3000)
+            return checkPortOrThrow(
+                myIp4,
+                CaptainConstants.configs.adminPortNumber3000 as any
+            )
         })
         .then(function () {
             const imageName = CaptainConstants.configs.nginxImageName
@@ -274,7 +308,7 @@ export function install() {
             return DockerApi.get().pullImage(imageName, undefined)
         })
         .then(function () {
-            const imageName = CaptainConstants.certbotImageName
+            const imageName = CaptainConstants.configs.certbotImageName
             console.log(`Pulling: ${imageName}`)
             return DockerApi.get().pullImage(imageName, undefined)
         })
@@ -282,6 +316,9 @@ export function install() {
             return backupManger.checkAndPrepareRestoration()
         })
         .then(function () {
+            if (CaptainConstants.configs.useExistingSwarm) {
+                return DockerApi.get().ensureSwarmExists()
+            }
             return DockerApi.get().initSwarm(myIp4)
         })
         .then(function (swarmId: string) {
@@ -304,6 +341,18 @@ export function install() {
                 key: EnvVar.keys.IS_CAPTAIN_INSTANCE,
                 value: '1',
             })
+            env.push({
+                key: EnvVar.keys.CAPTAIN_HOST_ADMIN_PORT,
+                value: CaptainConstants.configs.adminPortNumber3000 + '',
+            })
+            env.push({
+                key: EnvVar.keys.CAPTAIN_HOST_HTTP_PORT,
+                value: CaptainConstants.configs.nginxPortNumber80 + '',
+            })
+            env.push({
+                key: EnvVar.keys.CAPTAIN_HOST_HTTPS_PORT,
+                value: CaptainConstants.configs.nginxPortNumber443 + '',
+            })
 
             if (EnvVar.DEFAULT_PASSWORD) {
                 env.push({
@@ -321,6 +370,13 @@ export function install() {
                 volumeToMount.push({
                     hostPath: CaptainConstants.dockerSocketPath,
                     containerPath: CaptainConstants.dockerSocketPath,
+                })
+            }
+
+            if (EnvVar.CAPTAIN_BASE_DIRECTORY) {
+                env.push({
+                    key: EnvVar.keys.CAPTAIN_BASE_DIRECTORY,
+                    value: EnvVar.CAPTAIN_BASE_DIRECTORY,
                 })
             }
 
@@ -351,8 +407,8 @@ export function install() {
             ports.push({
                 protocol: 'tcp',
                 publishMode: 'host',
-                containerPort: CaptainConstants.captainServiceExposedPort,
-                hostPort: CaptainConstants.captainServiceExposedPort,
+                containerPort: 3000,
+                hostPort: CaptainConstants.configs.adminPortNumber3000,
             })
 
             return DockerApi.get().createServiceOnNodeId(

@@ -1,4 +1,4 @@
-import * as moment from 'moment'
+import moment from 'moment'
 import { AnyError } from '../models/OtherTypes'
 import CaptainConstants from './CaptainConstants'
 
@@ -29,9 +29,9 @@ class Logger {
         }
     }
 
-    static e(msgOrError: AnyError) {
+    static e(msgOrError: AnyError, message?: string) {
         const err = errorize(msgOrError)
-        console.error(`${getTime() + err}
+        console.error(`${getTime() + ((message || '') + '\n') + err}
 ${err.stack}`)
     }
 }

@@ -2,7 +2,9 @@ import express = require('express')
 import ApiStatusCodes from '../../../../api/ApiStatusCodes'
 import BaseApi from '../../../../api/BaseApi'
 import InjectionExtractor from '../../../../injection/InjectionExtractor'
+import { AppDeployTokenConfig, IAppDef } from '../../../../models/AppDefinition'
 import { CaptainError } from '../../../../models/OtherTypes'
+import CaptainManager from '../../../../user/system/CaptainManager'
 import CaptainConstants from '../../../../utils/CaptainConstants'
 import Logger from '../../../../utils/Logger'
 import Utils from '../../../../utils/Utils'
@@ -18,13 +20,12 @@ const DEFAULT_APP_CAPTAIN_DEFINITION = JSON.stringify({
 
 // unused images
 router.get('/unusedImages', function (req, res, next) {
-    const serviceManager =
-        InjectionExtractor.extractUserFromInjected(res).user.serviceManager
-
-    Promise.resolve()
+    return Promise.resolve()
         .then(function () {
             const mostRecentLimit = Number(req.query.mostRecentLimit || '0')
-            return serviceManager.getUnusedImages(mostRecentLimit)
+            return CaptainManager.get()
+                .getDiskCleanupManager()
+                .getUnusedImages(mostRecentLimit)
         })
         .then(function (unusedImages) {
             const baseApi = new BaseApi(
@@ -41,13 +42,13 @@ router.get('/unusedImages', function (req, res, next) {
 
 // delete images
 router.post('/deleteImages', function (req, res, next) {
-    const serviceManager =
-        InjectionExtractor.extractUserFromInjected(res).user.serviceManager
     const imageIds = req.body.imageIds || []
 
-    Promise.resolve()
+    return Promise.resolve()
         .then(function () {
-            return serviceManager.deleteImages(imageIds)
+            return CaptainManager.get()
+                .getDiskCleanupManager()
+                .deleteImages(imageIds)
         })
         .then(function () {
             const baseApi = new BaseApi(
@@ -67,7 +68,7 @@ router.get('/', function (req, res, next) {
         InjectionExtractor.extractUserFromInjected(res).user.serviceManager
     const appsArray: IAppDef[] = []
 
-    dataStore
+    return dataStore
         .getAppsDataStore()
         .getAppDefinitions()
         .then(function (apps) {
@@ -94,6 +95,7 @@ router.get('/', function (req, res, next) {
             baseApi.data = {
                 appDefinitions: appsArray,
                 rootDomain: dataStore.getRootDomain(),
+                captainSubDomain: CaptainConstants.configs.captainSubDomain,
                 defaultNginxConfig: defaultNginxConfig,
             }
 
@@ -125,7 +127,7 @@ router.post('/customdomain/', function (req, res, next) {
         InjectionExtractor.extractUserFromInjected(res).user.serviceManager
 
     const appName = req.body.appName
-    const customDomain = (req.body.customDomain || '').toLowerCase()
+    const customDomain = (req.body.customDomain || '').toLowerCase().trim()
 
     // verify customdomain.com going through the default NGINX
     // Add customdomain.com to app in Data Store
@@ -190,6 +192,7 @@ router.post('/register/', function (req, res, next) {
         InjectionExtractor.extractUserFromInjected(res).user.serviceManager
 
     const appName = req.body.appName as string
+    const projectId = `${req.body.projectId || ''}`
     const hasPersistentData = !!req.body.hasPersistentData
     const isDetachedBuild = !!req.query.detached
 
@@ -197,23 +200,33 @@ router.post('/register/', function (req, res, next) {
 
     Logger.d(`Registering app started: ${appName}`)
 
-    dataStore
-        .getAppsDataStore()
-        .registerAppDefinition(appName, hasPersistentData)
+    return Promise.resolve()
+        .then(function () {
+            if (projectId) {
+                return dataStore.getProjectsDataStore().getProject(projectId)
+                // if project is not found, it will throw an error
+            }
+        })
+        .then(function () {
+            return dataStore
+                .getAppsDataStore()
+                .registerAppDefinition(appName, projectId, hasPersistentData)
+        })
         .then(function () {
             appCreated = true
         })
         .then(function () {
-            const promiseToIgnore = serviceManager.scheduleDeployNewVersion(
-                appName,
-                {
+            const promiseToIgnore = serviceManager
+                .scheduleDeployNewVersion(appName, {
                     captainDefinitionContentSource: {
                         captainDefinitionContent:
                             DEFAULT_APP_CAPTAIN_DEFINITION,
                         gitHash: '',
                     },
-                }
-            )
+                })
+                .catch(function (error) {
+                    Logger.e(error)
+                })
 
             if (!isDetachedBuild) return promiseToIgnore
         })
@@ -248,14 +261,24 @@ router.post('/delete/', function (req, res, next) {
     const serviceManager =
         InjectionExtractor.extractUserFromInjected(res).user.serviceManager
 
-    const appName = req.body.appName
-    const volumes = req.body.volumes || []
+    const appName: string = req.body.appName
+    const volumes: string[] = req.body.volumes || []
+    const appNames: string[] = req.body.appNames || []
+    const appsToDelete: string[] = appNames.length ? appNames : [appName]
 
     Logger.d(`Deleting app started: ${appName}`)
 
-    Promise.resolve()
+    return Promise.resolve()
         .then(function () {
-            return serviceManager.removeApp(appName)
+            if (appNames.length > 0 && appName) {
+                throw ApiStatusCodes.createError(
+                    ApiStatusCodes.ILLEGAL_OPERATION,
+                    'Either appName or appNames should be provided'
+                )
+            }
+        })
+        .then(function () {
+            return serviceManager.removeApps(appsToDelete)
         })
         .then(function () {
             return Utils.getDelayedPromise(volumes.length ? 12000 : 0)
@@ -264,7 +287,7 @@ router.post('/delete/', function (req, res, next) {
             return serviceManager.removeVolsSafe(volumes)
         })
         .then(function (failedVolsToRemoved) {
-            Logger.d(`AppName is deleted: ${appName}`)
+            Logger.d(`Successfully deleted: ${appsToDelete.join(', ')}`)
 
             if (failedVolsToRemoved.length) {
                 const returnVal = new BaseApi(
@@ -293,7 +316,7 @@ router.post('/rename/', function (req, res, next) {
 
     Logger.d(`Renaming app started: From ${oldAppName} To ${newAppName} `)
 
-    Promise.resolve()
+    return Promise.resolve()
         .then(function () {
             return serviceManager.renameApp(oldAppName, newAppName)
         })
@@ -311,10 +334,12 @@ router.post('/update/', function (req, res, next) {
         InjectionExtractor.extractUserFromInjected(res).user.serviceManager
 
     const appName = req.body.appName
+    const projectId = req.body.projectId
     const nodeId = req.body.nodeId
     const captainDefinitionRelativeFilePath =
         req.body.captainDefinitionRelativeFilePath
     const notExposeAsWebApp = req.body.notExposeAsWebApp
+    const tags = req.body.tags || []
     const customNginxConfig = req.body.customNginxConfig
     const forceSsl = !!req.body.forceSsl
     const websocketSupport = !!req.body.websocketSupport
@@ -325,6 +350,7 @@ router.post('/update/', function (req, res, next) {
     const volumes = req.body.volumes || []
     const ports = req.body.ports || []
     const instanceCount = req.body.instanceCount || '0'
+    const redirectDomain = req.body.redirectDomain || ''
     const preDeployFunction = req.body.preDeployFunction || ''
     const serviceUpdateOverride = req.body.serviceUpdateOverride || ''
     const containerHttpPort = Number(req.body.containerHttpPort) || 80
@@ -371,23 +397,49 @@ router.post('/update/', function (req, res, next) {
     ) {
         res.send(
             new BaseApi(
-                ApiStatusCodes.STATUS_ERROR_GENERIC,
+                ApiStatusCodes.ILLEGAL_PARAMETER,
                 'Missing required Github/BitBucket/Gitlab field'
             )
         )
         return
     }
 
+    if (
+        repoInfo &&
+        repoInfo.sshKey &&
+        repoInfo.sshKey.indexOf('ENCRYPTED') > 0 &&
+        !CaptainConstants.configs.disableEncryptedCheck
+    ) {
+        res.send(
+            new BaseApi(
+                ApiStatusCodes.ILLEGAL_PARAMETER,
+                'You cannot use encrypted SSH keys'
+            )
+        )
+        return
+    }
+
+    if (
+        repoInfo &&
+        repoInfo.sshKey &&
+        repoInfo.sshKey.indexOf('END OPENSSH PRIVATE KEY-----') > 0
+    ) {
+        repoInfo.sshKey = repoInfo.sshKey.trim()
+        repoInfo.sshKey = repoInfo.sshKey + '\n'
+    }
+
     Logger.d(`Updating app started: ${appName}`)
 
-    serviceManager
+    return serviceManager
         .updateAppDefinition(
             appName,
+            projectId,
             description,
             Number(instanceCount),
             captainDefinitionRelativeFilePath,
             envVars,
             volumes,
+            tags,
             nodeId,
             notExposeAsWebApp,
             containerHttpPort,
@@ -396,6 +448,7 @@ router.post('/update/', function (req, res, next) {
             ports,
             repoInfo,
             customNginxConfig,
+            redirectDomain,
             preDeployFunction,
             serviceUpdateOverride,
             websocketSupport,

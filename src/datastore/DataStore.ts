@@ -3,9 +3,19 @@
  */
 import Configstore = require('configstore')
 import fs = require('fs-extra')
+import {
+    AutomatedCleanupConfigsCleaner,
+    IAutomatedCleanupConfigs,
+} from '../models/AutomatedCleanupConfigs'
+import CapRoverTheme from '../models/CapRoverTheme'
+import { GoAccessInfo } from '../models/GoAccessInfo'
+import { NetDataInfo } from '../models/NetDataInfo'
 import CaptainConstants from '../utils/CaptainConstants'
 import CaptainEncryptor from '../utils/Encryptor'
+import Utils from '../utils/Utils'
 import AppsDataStore from './AppsDataStore'
+import ProDataStore from './ProDataStore'
+import ProjectsDataStore from './ProjectsDataStore'
 import RegistriesDataStore from './RegistriesDataStore'
 
 // keys:
@@ -17,9 +27,14 @@ const FORCE_ROOT_SSL = 'forceRootSsl'
 const HAS_REGISTRY_SSL = 'hasRegistrySsl'
 const EMAIL_ADDRESS = 'emailAddress'
 const NET_DATA_INFO = 'netDataInfo'
+const GOACCESS_INFO = 'goAccessInfo'
 const NGINX_BASE_CONFIG = 'nginxBaseConfig'
 const NGINX_CAPTAIN_CONFIG = 'nginxCaptainConfig'
 const CUSTOM_ONE_CLICK_APP_URLS = 'oneClickAppUrls'
+const FEATURE_FLAGS = 'featureFlags'
+const AUTOMATED_CLEANUP = 'automatedCleanup'
+const THEMES = 'themes'
+const CURRENT_THEME = 'currentTheme'
 
 const DEFAULT_CAPTAIN_ROOT_DOMAIN = 'captain.localhost'
 
@@ -29,8 +44,19 @@ const DEFAULT_NGINX_BASE_CONFIG = fs
 const DEFAULT_NGINX_CAPTAIN_CONFIG = fs
     .readFileSync(__dirname + '/../../template/root-nginx-conf.ejs')
     .toString()
+
+let DEFAULT_NGINX_CONFIG_FOR_APP_PATH =
+    __dirname + '/../../template/server-block-conf.ejs'
+
+const SERVER_BLOCK_CONF_OVERRIDE_PATH =
+    CaptainConstants.captainDataDirectory + '/server-block-conf-override.ejs'
+
+if (fs.pathExistsSync(SERVER_BLOCK_CONF_OVERRIDE_PATH)) {
+    DEFAULT_NGINX_CONFIG_FOR_APP_PATH = SERVER_BLOCK_CONF_OVERRIDE_PATH
+}
+
 const DEFAULT_NGINX_CONFIG_FOR_APP = fs
-    .readFileSync(__dirname + '/../../template/server-block-conf.ejs')
+    .readFileSync(DEFAULT_NGINX_CONFIG_FOR_APP_PATH)
     .toString()
 
 class DataStore {
@@ -39,6 +65,8 @@ class DataStore {
     private data: Configstore
     private appsDataStore: AppsDataStore
     private registriesDataStore: RegistriesDataStore
+    proDataStore: ProDataStore
+    private projectsDataStore: ProjectsDataStore
 
     constructor(namespace: string) {
         const data = new Configstore(
@@ -53,6 +81,11 @@ class DataStore {
         this.namespace = namespace
         this.data.set(NAMESPACE, namespace)
         this.appsDataStore = new AppsDataStore(this.data, namespace)
+        this.projectsDataStore = new ProjectsDataStore(
+            this.data,
+            this.appsDataStore
+        )
+        this.proDataStore = new ProDataStore(this.data)
         this.registriesDataStore = new RegistriesDataStore(this.data, namespace)
     }
 
@@ -64,6 +97,66 @@ class DataStore {
 
     getNameSpace(): string {
         return this.data.get(NAMESPACE)
+    }
+
+    getFeatureFlags(): any {
+        const self = this
+        return self.data.get(FEATURE_FLAGS)
+    }
+
+    setFeatureFlags(featureFlags: any) {
+        const self = this
+        return Promise.resolve().then(function () {
+            return self.data.set(FEATURE_FLAGS, featureFlags)
+        })
+    }
+
+    getThemes(): Promise<CapRoverTheme[]> {
+        const self = this
+        return Promise.resolve().then(function () {
+            return self.data.get(THEMES) || []
+        })
+    }
+
+    deleteTheme(themeName: string) {
+        const self = this
+        return Promise.resolve()
+            .then(function () {
+                return self.getThemes()
+            })
+            .then(function (themesFetched) {
+                self.data.set(
+                    THEMES,
+                    Utils.copyObject(themesFetched).filter(
+                        (it) => it.name !== themeName
+                    )
+                )
+            })
+    }
+
+    saveThemes(themes: CapRoverTheme[]) {
+        const self = this
+        return Promise.resolve().then(function () {
+            self.data.set(
+                THEMES,
+                (themes || []).filter((it) => !it.builtIn)
+            )
+        })
+    }
+
+    setCurrentTheme(themeName: string | undefined) {
+        const self = this
+        return Promise.resolve() //
+            .then(function () {
+                return self.data.set(CURRENT_THEME, themeName || '')
+            })
+    }
+
+    getCurrentThemeName(): Promise<string | undefined> {
+        const self = this
+        return Promise.resolve().then(function () {
+            return self.data.get(CURRENT_THEME)
+        })
     }
 
     setHashedPassword(newHashedPassword: string) {
@@ -80,28 +173,52 @@ class DataStore {
         })
     }
 
+    setDiskCleanupConfigs(configs: IAutomatedCleanupConfigs) {
+        const self = this
+        return Promise.resolve().then(function () {
+            return self.data.set(
+                AUTOMATED_CLEANUP,
+                AutomatedCleanupConfigsCleaner.sanitizeInput(configs)
+            )
+        })
+    }
+
+    getDiskCleanupConfigs(): Promise<IAutomatedCleanupConfigs> {
+        const self = this
+        return Promise.resolve().then(function () {
+            return (
+                self.data.get(AUTOMATED_CLEANUP) ||
+                AutomatedCleanupConfigsCleaner.sanitizeInput({
+                    mostRecentLimit: 0,
+                    cronSchedule: '',
+                    timezone: '',
+                })
+            )
+        })
+    }
+
     /*
-			"smtp": {
-				"to": "",
-				"hostname": "",
-				"server": "",
-				"port": "",
-				"allowNonTls": false,
-				"password": "",
-				"username": ""
-			},
-			"slack": {
-				"hook": "",
-				"channel": ""
-			},
-			"telegram": {
-				"botToken": "",
-				"chatId": ""
-			},
-			"pushBullet": {
-				"fallbackEmail": "",
-				"apiToken": ""
-			}
+            "smtp": {
+                "to": "",
+                "hostname": "",
+                "server": "",
+                "port": "",
+                "allowNonTls": false,
+                "password": "",
+                "username": ""
+            },
+            "slack": {
+                "hook": "",
+                "channel": ""
+            },
+            "telegram": {
+                "botToken": "",
+                "chatId": ""
+            },
+            "pushBullet": {
+                "fallbackEmail": "",
+                "apiToken": ""
+            }
      */
     getNetDataInfo() {
         const self = this
@@ -127,6 +244,26 @@ class DataStore {
         })
     }
 
+    getGoAccessInfo() {
+        const self = this
+        const goAccessInfo = (self.data.get(GOACCESS_INFO) ||
+            {}) as GoAccessInfo
+        goAccessInfo.isEnabled = goAccessInfo.isEnabled || false
+        if (!goAccessInfo.data) {
+            goAccessInfo.data = {
+                rotationFrequencyCron: '0 0 1 * *', // monthly
+            }
+        }
+        return Promise.resolve(goAccessInfo)
+    }
+
+    setGoAccessInfo(goAccessInfo: GoAccessInfo) {
+        const self = this
+        return Promise.resolve().then(function () {
+            return self.data.set(GOACCESS_INFO, goAccessInfo)
+        })
+    }
+
     getRootDomain() {
         return this.data.get(CUSTOM_DOMAIN) || DEFAULT_CAPTAIN_ROOT_DOMAIN
     }
@@ -137,6 +274,14 @@ class DataStore {
 
     getAppsDataStore() {
         return this.appsDataStore
+    }
+
+    getProjectsDataStore() {
+        return this.projectsDataStore
+    }
+
+    getProDataStore() {
+        return this.proDataStore
     }
 
     getRegistriesDataStore() {

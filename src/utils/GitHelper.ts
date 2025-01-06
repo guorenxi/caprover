@@ -1,7 +1,7 @@
 import * as childProcess from 'child_process'
 import * as fs from 'fs-extra'
 import * as path from 'path'
-import * as git from 'simple-git/promise'
+import git from 'simple-git'
 import * as util from 'util'
 import * as uuid from 'uuid'
 import CaptainConstants from './CaptainConstants'
@@ -18,7 +18,7 @@ export default class GitHelper {
             /(?<domain>[^\s\/\?#:]+)/,
             /(?::(?<port>[0-9]{1,5}))?/,
             /(?:[\/:](?<owner>[^\s\/\?#:]+))?/,
-            /(?:[\/:](?<repo>[^\s\/\?#:.]+))/,
+            /(?:[\/:](?<repo>(?:[^\s\?#:.]|\.(?!git\/?\s*$))+))/,
             /(?:.git)?\/?\s*$/,
         ]
             .map((r) => r.source)
@@ -79,7 +79,7 @@ export default class GitHelper {
                         .env('GIT_SSH_COMMAND', `ssh -i ${SSH_KEY_PATH}`) //
                         .raw([
                             'clone',
-                            '--recursive',
+                            '--recurse-submodules',
                             '-b',
                             branch,
                             REPO_GIT_PATH,
@@ -100,7 +100,14 @@ export default class GitHelper {
             Logger.dev(`Cloning HTTPS ${remote}`)
             return git() //
                 .silent(true) //
-                .raw(['clone', '--recursive', '-b', branch, remote, directory])
+                .raw([
+                    'clone',
+                    '--recurse-submodules',
+                    '-b',
+                    branch,
+                    remote,
+                    directory,
+                ])
                 .then(function () {
                     //
                 })

@@ -1,6 +1,71 @@
 ## [Next Version - available as `edge`]
 
+-   TBD
+
+## [1.13.3] - 2024-12-01
+
+-   Critical security patches
+-   Added UDP port mapping for nginx to allow http/3
+
+## [1.13.2] - 2024-11-09
+
+-   Fixed crash on private registry without push auth [ca9831](https://github.com/caprover/caprover/commit/ca9831399e05de9144cfd1fb63c9f88790a4cad2)
+-   Fixed local timestamp issue [PR-169](https://github.com/caprover/caprover-frontend/pull/169)
+-   Fixed line wrap issue with Firefox [issue-2179](https://github.com/caprover/caprover/issues/2179)
+-   Fixed some translation issues
+
+## [1.13.1] - 2024-10-19
+
+-   Fixed an auth issue on frontend [cd916c](https://github.com/caprover/caprover-frontend/commit/cd916c53c4b15ec3f71863075dc4d2a729e2266e)
+
+## [1.13.0] - 2024-10-19
+
+-   New: Added project structure [issue-158](https://github.com/caprover/caprover-frontend/pull/158)
+-   New: Added translations in multiple languages [issue-159](https://github.com/caprover/caprover-frontend/pull/159)
+-   New: Added themes! Now you can pick your favorite theme or build a new one! [issue-160](https://github.com/caprover/caprover-frontend/pull/160)
+-   New: Added automatic IP fallback on installation [ca196e5](https://github.com/caprover/caprover/commit/ca196e51be2df80836ff027a99bb92dde83c4f7f)
+-   New: Disallow passphrase protected SSH keys [issue-2153](https://github.com/caprover/caprover/issues/2153)
+-   Fixed: Deploy time now uses the proper locale [issue-157](https://github.com/caprover/caprover-frontend/issues/157)
+-   Fixed: The app log box is resizable again [issue-2112](https://github.com/caprover/caprover/issues/2112)
+-   Fixed: Showing the missing timezones due to daylight saving time [issue-2110](https://github.com/caprover/caprover/issues/2110)
+-   Fixed: Log Search filter crash on invalid Regex [issue-2128](https://github.com/caprover/caprover/issues/2128)
+
+## [1.12.0] - 2024-08-17
+
+**IMPORTANT**: this version bumps the minimum Docker API to 1.43. Please run `docker version | grep API` before upgrading your CapRover installation.
+
+-   New: Ability to delete multiple apps at once
+-   New: Ability to setup automated disk cleanup
+-   New: Support for custom Certbot commands allowing support for DNS challenges [Issue-1761](https://github.com/caprover/caprover/issues/1761)
+-   New: Ability to search app logs on the web [Issue-149](https://github.com/caprover/caprover-frontend/issues/149)
+-   New: Added support for Docker capabilities (enabling VPN one click apps etc)
+-   Improved: Now the redirects include the path
+-   Improved: SSH key handling to avoid human mistakes
+-   Security: Updated npm dependencies security update
+-   Security: Updated Certbot image (2.11.0)
+
+## [1.11.1] - 2023-09-16
+
+-   Fixed: Malformatted SSH issue [Issue-1863](https://github.com/caprover/caprover/issues/1863)
+-   Fixed: Cannot save due to undefined property [Issue-1871](https://github.com/caprover/caprover/issues/1871)
+-   New/Experimental: Added a helper script for disabling the OTP
+-   Improved: Locking the nginx version to avoid unstable deployments and upgrades
+
+## [1.11.0] - 2023-08-27
+
 -   Improved: Pulling the new image before attempt to upgrade the CapRover engine to improve reliability of upgrades
+-   Improved: Allowed custom git usernames [PR-1254](https://github.com/caprover/caprover/pull/1254)
+-   Improved: Enabled gzip for the dashboard for a faster load
+-   Improved: Allowed custom captain domain for webhooks [PR-1330](https://github.com/caprover/caprover/pull/1330)
+-   Improved: Updated Netdata version [PR-1432](https://github.com/caprover/caprover/pull/1432). This is a major upgrade. Make sure to test your notifications and emails.
+-   Improved: Added support for overwriting app defaults NGINX config [PR-1377](https://github.com/caprover/caprover/pull/1377)
+-   Improved: Added support for overriding mesh network settings and using an existing Docker Swarm [56e739c](https://github.com/caprover/caprover/commit/56e739c0f57ce873bf8d032de838c415548041b7)
+-   Improved: Updated the Docker image to use Alpine base image. Image size is now less than half!
+-   New/Experimental: Added support for domain aliases (redirecting to specific domains) [PR-1744](https://github.com/caprover/caprover/pull/1744)
+-   New/Experimental: Added support for app tags for grouping [PR-118](https://github.com/caprover/caprover-frontend/pull/118)
+-   New/Experimental: Premium features (two factor auth, build success and failure alerts, login alerts) - will be rolled out gradually.
+-   New/Experimental: Anonymous metric reporting added to CapRover. Please be sure to read TERMS_AND_CONDITIONS.md for details.
+-   Fixed: Allowing dots to be present in repo names [PR-1553](https://github.com/caprover/caprover/pull/1553)
 
 ## [1.10.1] - 2021-10-09
 
